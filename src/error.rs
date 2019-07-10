@@ -1,4 +1,4 @@
-use super::{
+use crate::{
     fmt_ext::SeqFmt,
     source::Span,
     token::{Token, TokenPattern},
@@ -110,7 +110,7 @@ impl Diagnostic {
         self.errors.push(Error { kind, warning: true });
     }
 
-    pub fn errors(&self) -> &[Error] {
+    pub fn as_slice(&self) -> &[Error] {
         &self.errors
     }
 

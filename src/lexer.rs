@@ -167,8 +167,10 @@ impl Lexer {
     fn is_unquoted(&self) -> bool {
         self.reader.curr().map_or(false, |ch| {
             ch == "_"
-                || ipa::SYMBOLS.binary_search(&ch).is_ok()
+                || ch.len() == 1 && ch >= "a" && ch <= "z"
+                || ch.len() == 1 && ch >= "A" && ch <= "Z"
                 || ch.len() == 1 && ch >= "0" && ch <= "9"
+                || ipa::SYMBOLS.binary_search(&ch).is_ok()
         })
     }
 
@@ -227,11 +229,7 @@ impl Lexer {
         }
 
         let span = self.reader.span();
-        let kind = match &*span.content() {
-            "alphabet" => TokenKind::Alphabet,
-            "class" => TokenKind::Class,
-            _ => TokenKind::ClassIdent(string),
-        };
+        let kind = TokenKind::ClassIdent(string);
 
         Ok(Token { kind, span })
     }
@@ -313,5 +311,104 @@ impl Lexer {
         } else {
             Ok(Token { kind: TokenKind::Eof, span: self.reader.span() })
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Lexer;
+    use crate::{error::Diagnostic, source::Src, token::TokenKind};
+
+    #[test]
+    fn parens_and_unquoted() {
+        let src = Src::new("foo.psh", "((x)())");
+        let mut errs = Diagnostic::new();
+
+        let mut lexer = Lexer::new(src.reader(), &mut errs);
+
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::OpenParen);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::OpenParen);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(
+            lexer.curr().unwrap().kind,
+            TokenKind::String("x".to_owned())
+        );
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::CloseParen);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::OpenParen);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::CloseParen);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::CloseParen);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Eof);
+
+        assert!(!lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Eof);
+
+        assert_eq!(errs.as_slice().len(), 0);
+    }
+
+    #[test]
+    fn keywords_and_commas() {
+        let src = Src::new("foo.psh", "class, alphabet,");
+        let mut errs = Diagnostic::new();
+
+        let mut lexer = Lexer::new(src.reader(), &mut errs);
+
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Class);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Comma);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Alphabet);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Comma);
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Eof);
+
+        assert!(!lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Eof);
+
+        assert_eq!(errs.as_slice().len(), 0);
+    }
+
+    #[test]
+    fn class_and_quoted_with_escape() {
+        let src = Src::new("foo.psh", r"'ah\\he\'end' \V");
+        let mut errs = Diagnostic::new();
+
+        let mut lexer = Lexer::new(src.reader(), &mut errs);
+
+        assert_eq!(
+            lexer.curr().unwrap().kind,
+            TokenKind::String(r"ah\he'end".to_owned())
+        );
+        assert!(lexer.next(&mut errs));
+
+        assert_eq!(
+            lexer.curr().unwrap().kind,
+            TokenKind::ClassIdent("V".to_owned())
+        );
+        assert!(lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Eof);
+
+        assert!(!lexer.next(&mut errs));
+        assert_eq!(lexer.curr().unwrap().kind, TokenKind::Eof);
+
+        assert_eq!(errs.as_slice().len(), 0);
+    }
+
+    #[test]
+    fn error_unclosed() {
+        let src = Src::new("foo.psh", r"'ah");
+
+        let mut errs = Diagnostic::new();
+
+        let lexer = Lexer::new(src.reader(), &mut errs);
+
+        assert!(lexer.curr().is_err());
+        assert_eq!(errs.as_slice().len(), 1);
     }
 }
